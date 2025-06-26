@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <signal.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -16,7 +17,7 @@ float house_profit = 0.0;
 int next_player_id = 1;
 float last_multiplier = 1.0;
 
-// Mutex para proteger o acesso concorrente ao estado global
+time_t betting_start_time;
 pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void usage(int argc, char **argv) {
@@ -53,6 +54,7 @@ void *game(void *data) {
         }
 
         current_state = BETTING;
+        betting_start_time = time(NULL);
         printf("event=start | id=* | N=%d\n", active_clients);
 
         struct aviator_msg start_msg;
@@ -64,14 +66,12 @@ void *game(void *data) {
         pthread_mutex_unlock(&state_mutex);
 
         for (int i = 0; i < 100; i++) {
-            usleep(100000); // Dorme por 100ms
+            usleep(100000);
         }
 
         usleep(100000);
         
         pthread_mutex_lock(&state_mutex);
-
-        // fim das apostas, comeco do jogo
 
         current_state = IN_FLIGHT;
         int players_in_round = 0;
@@ -89,15 +89,13 @@ void *game(void *data) {
         strcpy(closed_msg.type, "closed");
         broadcast_message(&closed_msg);
 
-        // em voo, enviar multiplicador
-
         float me = explosion_point(players_in_round, total_bet_value);
         float multiplier = 1.00;
         last_multiplier = multiplier;
         pthread_mutex_unlock(&state_mutex);
 
         while (multiplier < me) {
-            usleep(100000); // 100ms
+            usleep(100000);
             
             pthread_mutex_lock(&state_mutex);
 
@@ -118,8 +116,6 @@ void *game(void *data) {
             pthread_mutex_unlock(&state_mutex);
         }
 
-        // explosao, lucros e perdas
-
         pthread_mutex_lock(&state_mutex);
         current_state = EXPLODED;
         printf("event=explode | id=* | m=%.2f\n", last_multiplier);
@@ -135,9 +131,8 @@ void *game(void *data) {
                     clients[i]->total_profit -= clients[i]->current_bet;
                     house_profit += clients[i]->current_bet;
                     
-                    printf("event=explode | id=%d | m=%.2f\n", clients[i]->id, me);
-                    printf("event=profit | id=%d | player_profit=%.2f\n", 
-                           clients[i]->id, clients[i]->total_profit);
+                    printf("event=explode | id=%d | m=%.2f\n", clients[i]->id, last_multiplier);
+                    printf("event=profit | id=%d | player_profit=%.2f\n", clients[i]->id, clients[i]->total_profit);
                     
                     struct aviator_msg profit_msg;
                     memset(&profit_msg, 0, sizeof(profit_msg));
@@ -155,8 +150,6 @@ void *game(void *data) {
         strcpy(house_profit_msg.type, "profit");
         house_profit_msg.house_profit = house_profit;
         broadcast_message(&house_profit_msg);
-
-        // reset
 
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if(clients[i]) {
@@ -190,24 +183,29 @@ void * client_thread(void *data) {
     struct  client_data *cdata = (struct client_data *)data;
     struct aviator_msg msg;
 
-    if (recv(cdata->csock, &msg, sizeof(msg), 0) <= 0) {
+    char nick_buffer[NICK_LEN + 1] = {0};
+    if (recv(cdata->csock, nick_buffer, NICK_LEN, 0) <= 0) {
         remove_client(cdata->id);
         return NULL;
     }
+    strncpy(cdata->nickname, nick_buffer, NICK_LEN);
+    printf("[log] client %d is %s\n", cdata->id, cdata->nickname);
 
     pthread_mutex_lock(&state_mutex);
-    if (strcmp(msg.type, "nick") == 0) {
-        char *received_nick = (char*)&msg.value; 
-        strncpy(cdata->nickname, received_nick, NICK_LEN);
-        cdata->nickname[NICK_LEN] = '\0';
-        printf("[log] client %d is %s\n", cdata->id, cdata->nickname);
-    }
 
     if (current_state == BETTING) {
         struct aviator_msg start_msg;
         memset(&start_msg, 0, sizeof(start_msg));
         strcpy(start_msg.type, "start");
-        start_msg.value = 10;
+
+        time_t now = time(NULL);
+        int time_elapsed = now - betting_start_time;
+        int time_remaining = 10 - time_elapsed;
+
+        if (time_remaining < 0) {
+            time_remaining = 0;
+        }
+        start_msg.value = time_remaining;
         send(cdata->csock, &start_msg, sizeof(start_msg), 0);
     }
     pthread_mutex_unlock(&state_mutex);
@@ -236,19 +234,28 @@ void * client_thread(void *data) {
             if (current_state == IN_FLIGHT && cdata->has_bet_this_round && !cdata->has_cashed_out) {
                 cdata->has_cashed_out = true;
                 
-                float payout = cdata->current_bet * msg.value;
+                float server_multiplier = last_multiplier;
+                float payout = cdata->current_bet * server_multiplier;
                 float profit_this_round = payout - cdata->current_bet;
                 cdata->total_profit += profit_this_round;
                 house_profit -= profit_this_round;
 
-                printf("event=cashout | id=%d | m=%.2f\n", cdata->id, msg.value);
+                printf("event=cashout | id=%d | m=%.2f\n", cdata->id, server_multiplier);
                 printf("event=payout | id=%d | payout=%.2f\n", cdata->id, payout);
                 printf("event=profit | id=%d | player_profit=%.2f\n", cdata->id, cdata->total_profit);
 
-                struct aviator_msg payout_msg = {.type="payout", .value = payout, .player_id = cdata->id};
+                struct aviator_msg payout_msg;
+                memset(&payout_msg, 0, sizeof(payout_msg));
+                strcpy(payout_msg.type, "payout");
+                payout_msg.value = payout;
+                payout_msg.player_profit = server_multiplier; 
                 send(cdata->csock, &payout_msg, sizeof(payout_msg), 0);
-                
-                struct aviator_msg profit_msg = {.type="profit", .player_profit = cdata->total_profit, .player_id = cdata->id};
+
+                struct aviator_msg profit_msg;
+                memset(&profit_msg, 0, sizeof(profit_msg));
+                strcpy(profit_msg.type, "profit");
+                profit_msg.player_profit = cdata->total_profit;
+                profit_msg.player_id = cdata->id;
                 send(cdata->csock, &profit_msg, sizeof(profit_msg), 0);
             }
         } else if (strcmp(msg.type, "bye") == 0) {
@@ -263,6 +270,8 @@ void * client_thread(void *data) {
 }
 
 int main(int argc, char **argv) {
+    signal(SIGPIPE, SIG_IGN);
+
     if (argc < 3) {
         usage(argc, argv);
     }
@@ -328,7 +337,7 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        struct client_data *cdata = malloc(sizeof(*cdata));
+        struct client_data *cdata = calloc(1, sizeof(*cdata));
         if (!cdata) {
             logexit("malloc");
         }

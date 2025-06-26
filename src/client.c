@@ -30,28 +30,6 @@ void cleaninput() {
     } while (c != '\n' && c != EOF);
 }
 
-void *countdown_thread(void *data) {
-    (void)data;
-
-    for (int i = 9; i >= 0; i--) {
-        if (!atomic_load(&countdown_active)) {
-            break; 
-        }
-
-        sleep(1);
-
-        if (!atomic_load(&countdown_active)) {
-            break;
-        }
-
-        printf("\r> Rodada aberta! Digite o valor da aposta ou [Q] para sair (%d segundos restantes): ", i);
-        fflush(stdout);
-    }
-
-    atomic_store(&countdown_active, false);
-    return NULL;
-}
-
 void *server_listener_thread(void *data) {
     int s = *(int*)data;
     struct aviator_msg msg;
@@ -64,13 +42,7 @@ void *server_listener_thread(void *data) {
             printf("\nRodada aberta! Digite o valor da aposta ou [Q] para sair (%d segundos restantes): \n", (int)msg.value);
             fflush(stdout);
 
-            atomic_store(&countdown_active, true);
-            pthread_t countdown_tid;
-            pthread_create(&countdown_tid, NULL, countdown_thread, NULL);
-            pthread_detach(countdown_tid);
-
         } else if (strcmp(msg.type, "closed") == 0) {
-            atomic_store(&countdown_active, false);
 
             printf("\nApostas encerradas! Nao e mais possivel apostar nesta rodada.\n");
             if (bet_placed) {
@@ -78,11 +50,9 @@ void *server_listener_thread(void *data) {
                 game_in_flight = true;
             }
         } else if (strcmp(msg.type, "multiplier") == 0) {
-            atomic_store(&last_multiplier, msg.value);
             printf("\rMultiplicador atual: %.2fx", msg.value);
             fflush(stdout);
         } else if (strcmp(msg.type, "explode") == 0) {
-            atomic_store(&countdown_active, false);
             game_in_flight = false;
             printf("\nAviãozinho explodiu em: %.2fx\n", msg.value);
             if (bet_placed) {
@@ -90,7 +60,7 @@ void *server_listener_thread(void *data) {
                 bet_placed = false;
             }
         } else if (strcmp(msg.type, "payout") == 0) {
-            printf("\nVocê sacou em %.2fx e ganhou R$ %.2f!\n", atomic_load(&last_multiplier), msg.value);
+            printf("\nVocê sacou em %.2fx e ganhou R$ %.2f!\n", msg.player_profit, msg.value);
             bet_placed = false;
         } else if (strcmp(msg.type, "profit") == 0) {
             if (msg.player_id != 0) {
@@ -100,7 +70,6 @@ void *server_listener_thread(void *data) {
                 printf("Profit da casa: R$ %.2f\n", msg.house_profit);
             }
         } else if (strcmp(msg.type, "bye") == 0) {
-            atomic_store(&countdown_active, false);
             printf("\nO servidor caiu, mas sua esperança pode continuar de pé. Até breve!\n");
             close(s);
             exit(EXIT_SUCCESS);
@@ -145,18 +114,13 @@ int main(int argc, char **argv) {
 
     printf("\nConectado ao servidor.\n");
 
-    struct aviator_msg nick_msg;
-    memset(&nick_msg, 0, sizeof(nick_msg));
-    strcpy(nick_msg.type, "nick");
-    // Armazena o nickname nos primeiros bytes do campo value
-    memcpy(&nick_msg.value, my_nickname, strlen(my_nickname));
-    send(s, &nick_msg, sizeof(nick_msg), 0);
-    
-    // Inicia a thread para ouvir o servidor
+    if (send(s, my_nickname, strlen(my_nickname) + 1, 0) < 0) {
+    logexit("send nickname");
+    }
+
     pthread_t listener_tid;
     pthread_create(&listener_tid, NULL, server_listener_thread, &s);
 
-    // Loop principal para entrada do usuário
     char line[BUFSZ];
     while (fgets(line, BUFSZ, stdin) != NULL) {
         struct aviator_msg msg_out;
@@ -187,7 +151,6 @@ int main(int argc, char **argv) {
             strcpy(msg_out.type, "cashout");
             msg_out.value = atomic_load(&last_multiplier);
             send(s, &msg_out, sizeof(msg_out), 0);
-            printf("-> Pedido de cashout enviado.\n");
         } else {
             printf("Error: Invalid command\n");
         }
