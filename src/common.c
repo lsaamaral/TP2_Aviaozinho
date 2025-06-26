@@ -2,12 +2,18 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include <arpa/inet.h>
 
 void logexit(const char *msg) {
     perror(msg);
     exit(EXIT_FAILURE);
+}
+
+float explosion_point(int num_players, float full_bets) {
+    float me = sqrtf(1 + num_players + (0.01f * full_bets));
+    return me;
 }
 
 int addrparse(const char *addrstr, const char *portstr, struct sockaddr_storage *storage)

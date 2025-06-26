@@ -1,0 +1,8 @@
+/bin/
+/client
+/server
+
+/objects/
+*.o
+
+.vscode/

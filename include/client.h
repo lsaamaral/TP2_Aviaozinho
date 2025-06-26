@@ -14,7 +14,7 @@ void usage(int argc, char **argv);
 /**
  * @brief Retira o lixo de scanfs para entradas que dao problema
  */
-void clean_n();
+void clean();
 
 /**
  * @brief Loop principal, verifica se a conexao esta correta, recebe as mensagens do servidor e processa elas. Encerra quando recebe o fim do jogo.

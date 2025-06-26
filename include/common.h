@@ -2,34 +2,41 @@
 
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <pthread.h>
+#include <stdbool.h>
+ 
+#define STR_LEN  11
+#define NICK_LEN 13
+#define BUFSZ 1024
+#define MAX_CLIENTS 15
 
-#define MSG_SIZE 256
 
-/**
- * @brief Tipos de mensagens que sao possiveis entre a interacao do cliente e do servidor
- */
-typedef enum { 
-    MSG_REQUEST,
-    MSG_RESPONSE,
-    MSG_RESULT,
-    MSG_PLAY_AGAIN_REQUEST,
-    MSG_PLAY_AGAIN_RESPONSE,
-    MSG_ERROR,
-    MSG_END         
-} MessageType;
+struct aviator_msg {
+    int32_t player_id;
+    float value;
+    char type[STR_LEN]; // tipo da mensagem
+    float player_profit;
+    float house_profit;
+};
 
-/**
- * @brief Struct que armazena informacoes importantes para o funcionamento da logica da conversa (o que os dois jogadores fizeram, quem ganhou o jogo, total de vitorias)
- */
-typedef struct { 
-    int type;
-    int client_action;
-    int server_action;
-    int result;
-    int client_wins;
-    int server_wins;
-    char message[MSG_SIZE];
-} GameMessage; 
+typedef enum {
+    WAITING_FOR_PLAYERS,
+    BETTING,
+    IN_FLIGHT,
+    EXPLODED
+} game_state_t;
+
+struct client_data {
+    int csock;
+    struct sockaddr_storage storage;
+    int id;
+    char nickname[NICK_LEN + 1];
+    float current_bet;
+    float total_profit;
+    bool has_bet_this_round;
+    bool has_cashed_out;
+    pthread_t tid;
+};
 
 /**
  * @brief Armazena o erro e encerra o programa. Retirada da videoaula
@@ -37,6 +44,12 @@ typedef struct {
  * @param msg Mensagem de erro que precisa ser exibida
  */
 void logexit(const char *msg);
+
+/**
+ * @brief Calcula o ponto em que o aviaozinho ira explodir a partir da formula fornecida
+ * 
+ */
+float explosion_point(int num_players, float total_apostado);
 
 /**
  * @brief Converte um IP e porta para a struct sockaddr_storage
