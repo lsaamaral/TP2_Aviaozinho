@@ -23,13 +23,6 @@ void usage(int argc, char **argv) {
     exit(EXIT_FAILURE);
 }
 
-void cleaninput() {
-    int c;
-    do {
-        c = getchar();
-    } while (c != '\n' && c != EOF);
-}
-
 void *server_listener_thread(void *data) {
     int s = *(int*)data;
     struct aviator_msg msg;
@@ -111,8 +104,6 @@ int main(int argc, char **argv) {
     if ( 0 != connect(s, addr, sizeof(storage))) {
         logexit("connect");
     }
-
-    printf("\nConectado ao servidor.\n");
 
     if (send(s, my_nickname, strlen(my_nickname) + 1, 0) < 0) {
     logexit("send nickname");

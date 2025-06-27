@@ -304,7 +304,6 @@ int main(int argc, char **argv) {
 
     char addrstr[BUFSZ];
     addrtostr(addr, addrstr, BUFSZ);
-    printf("Servidor escutando em %s\n", addrstr);
 
     pthread_t game_thread_id;
     if (pthread_create(&game_thread_id, NULL, game, NULL) != 0) {

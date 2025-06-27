@@ -12,12 +12,15 @@
 void usage(int argc, char **argv);
 
 /**
- * @brief Retira o lixo de scanfs para entradas que dao problema
+ * @brief Responsavel por receber e processar as mensagens do servidor. Tipo das mensagens: start, multiplier, explode, payout e profit
+ *
+ * @param data Ponteiro para o socket da conexao com o servidor
+ * @return Retorna NULL quando a conexao com o servidor para
  */
-void clean();
+void *server_listener_thread(void *data);
 
 /**
- * @brief Loop principal, verifica se a conexao esta correta, recebe as mensagens do servidor e processa elas. Encerra quando recebe o fim do jogo.
+ * @brief Loop principal, verifica se a conexao esta correta, recebe as mensagens do servidor e processa elas. Encerra quando recebe o fim do jogo
  * 
  * @param argc Numero de argumentos
  * @param argv Vetor de argumentos
